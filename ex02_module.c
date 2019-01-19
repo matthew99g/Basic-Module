@@ -1,145 +1,162 @@
-#include <linux/init.h>				/* Needed for macros */
-#include <linux/module.h>			/* Needed by all modules */
-#include <linux/moduleparam.h>		/* Needed to take parameters from shell */
+/*
+ *	This is an example character linux module
+ * 	This module does data operations in streams
+ * 	This module is also does data operations in sync
+ */
+
+//
+// Required headers for module, data operations, data types, and user space communication
 #include <linux/stat.h>
-#include <linux/kernel.h>			/* KERN_INFO */
-#include <linux/fs.h>				/* KERNEL MODE FS FOR CHAR DEVICE DRIVER*/
-#include <asm/uaccess.h>			/* For sending kernel data to user */
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/fs.h>
+#include <asm/uaccess.h>
 
-#define DRIVER_AUTHOR 	"Matthew Todd Geiger <matthewgeiger99@gmail.com>"
-#define DRIVER_DESC		"Sample Test Driver"
+// Defining some info used for init
+#define __MODULE_NAME "CHARACTER_DEVICE_MODULE"
+#define __MODULE_DESCRIPTION "Example character device module"
+#define __MODULE_LISCENSE "GPL"
+#define __MODULE_AUTHOR "Matthew Todd Geiger <matthewgeiger99@gmail.com>"
+#define __MODULE_MAJOR_NUMBER 240
 
-/* Example variable input via shell terminal */
-static int iData = 0;
-static int major = 0;
-static int iDeviceOpen = 0;
+// Set mod info
+MODULE_AUTHOR(__MODULE_AUTHOR);
+MODULE_LICENSE(__MODULE_LISCENSE);
+MODULE_DESCRIPTION(__MODULE_DESCRIPTION);
+
+// Set some globals
+// Remember that a kernel stack is small!
+static int iMajorNumber = 0;
+
+static uint8_t u8DeviceOpen = 0;
 
 static char szBuffer[80];
 static char *szPtr;
 
+ /***************************************/
+// CREATE YOUR FILE OPERATION FUNCTIONS //
+/***************************************/
+
 //
-// Define IO Functions(File Operations)
-int ex01_open(struct inode *inode, struct file *file) {
-	if(iDeviceOpen) {
-		printk(KERN_ALERT "Device already open!");
+// FUNCTION RAN WHEN DEVICE FILE IS OPENED
+int
+__mod_open(struct inode *inode, struct file *file)
+{
+	// Check if device file is already open
+	if(u8DeviceOpen) {
+		printk(KERN_ALERT "%s: Device file already opened!\n", __MODULE_NAME);
 		return -EBUSY;
 	}
 
-	iDeviceOpen++;
+	// Label device open
+	u8DeviceOpen++;
 
-	sprintf(szBuffer, "Test Message!\n");
+	// Create buffer for read operation
+	sprintf(szBuffer, "%s: [!] DEVICE FILE RESPONSE [!]\n", __MODULE_NAME);
 	szPtr = szBuffer;
 
+	// Lock module
 	try_module_get(THIS_MODULE);
 
-	printk(KERN_INFO "IN %s", __FUNCTION__);
-	return 0;
-}
-ssize_t
-ex01_read(struct file *filp,   /* see include/linux/fs.h   */
-                           char *buffer,        /* buffer to fill with data */
-                           size_t length,       /* length of the buffer     */
-                           loff_t * offset)
-{
-        /*
-         * Number of bytes actually written to the buffer 
-         */
-        int bytes_read = 0;
-        /*
-         * If we're at the end of the message, 
-         * return 0 signifying end of file 
-         */
-        if (*szPtr == 0)
-                return 0;
-        /* 
-         * Actually put the data into the buffer 
-         */
-        while (length && *szPtr) {
-                /* 
-                 * The buffer is in the user data segment, not the kernel 
-                 * segment so "*" assignment won't work.  We have to use 
-                 * put_user which copies data from the kernel data segment to
-                 * the user data segment. 
-                 */
-                put_user(*(szPtr++), buffer++);
-                length = length - 1;
-                bytes_read = bytes_read + 1;
-        }
-        /* 
-         * Most read functions return the number of bytes put into the buffer
-         */
-        return bytes_read;
-}
-/*  
- * Called when a process writes to dev file: echo "hi" > /dev/hello 
- */
-ssize_t
-ex01_write(struct file *filp, const char *buff, size_t len, loff_t * off)
-{
-        printk(KERN_ALERT "Sorry, this operation isn't supported.\n");
-        return EINVAL;
-}
-int ex01_close(struct inode *inode, struct file *file){
-	if(iDeviceOpen <= 0) {
-		printk(KERN_ALERT "Device already closed!");
-		return -EBUSY;
-	}
-
-	iDeviceOpen--;
-
-	printk(KERN_INFO "IN %s", __FUNCTION__);
-	
-	module_put(THIS_MODULE);
-	
-	return 0;
-}
-
-struct file_operations ex01_file_operations = {
-	.owner = THIS_MODULE,
-	.open = ex01_open,
-	.read = ex01_read,
-	.write = ex01_write,
-	.release = ex01_close,
-};
-
-/* Grab command line param */
-module_param(iData, int, 0644);
-
-// 
-//	Init Function 
-static int __init
-ex01_module_init(void)
-{
-	printk(KERN_INFO "ex01_module: Indside the %s function | %d\n", __FUNCTION__, iData);
-
-	/* Register CHAR DEVICE with kernel */
-	major = register_chrdev(240,
-					"Simple CHAR Driver",
-					&ex01_file_operations);
-	if(major < 0) {
-		printk(KERN_ALERT "Failed to register device driver\n");
-		return major;
-	}
-
+	printk(KERN_INFO "%s: Device file opened\n", __MODULE_NAME);
 	return 0;
 }
 
 //
-// Exit Function
-static void __exit
-ex01_module_exit(void)
+// FUNCTION TO CLOSE DEVICE FILE
+int
+__mod_close(struct inode *inode, struct file *file)
 {
-	printk(KERN_INFO "ex01_module: Exiting");
+	// Check if device file is already closed
+	if(u8DeviceOpen <= 0) {
+		printk(KERN_ALERT "%s: Device file already closed!\n", __MODULE_NAME);
+		return -EBUSY;
+	}
 
-	/* Unregister CHAR DEVICE with kernel */
-	unregister_chrdev(240, "Simple Char Driver");
+	// Label device closed
+	u8DeviceOpen--;
+
+	// Unlock module
+	module_put(THIS_MODULE);
+
+	printk(KERN_INFO "%s: Device closed successfully\n", __MODULE_NAME);
+	return 0;
 }
 
-/* Set init and exit module functions */
-module_init(ex01_module_init);
-module_exit(ex01_module_exit);
+//
+// FUNCTION TO READ DEVICE FILE
+ssize_t
+__mod_read(struct file* file, char *buffer, size_t length, loff_t *offset)
+{
+	int iBytesRead = 0;
 
-MODULE_LICENSE("GPL");
+	// Check for NULL string
+	if(*szPtr == 0)
+		return 0;
 
-MODULE_AUTHOR(DRIVER_AUTHOR);
-MODULE_DESCRIPTION(DRIVER_DESC);
+	// Send one byte at a time
+	while(length && *szPtr) {
+		// Send byte and increment
+		put_user(*(szPtr++), buffer++);
+
+		// Subtract length and increment bytes read
+		length--;
+		iBytesRead++;
+	}
+
+	printk(KERN_INFO "%s: Device read successfully\n", __MODULE_NAME);
+	return iBytesRead;
+}
+
+ssize_t
+__mod_write(struct file* file, const char *buffer, size_t length, loff_t *offset)
+{
+	printk(KERN_ALERT "%s: WRITE OPERATION IS NOT AVAILIABLE IN THIS MODULE\n", __MODULE_NAME);
+	return EINVAL;
+}
+
+// Define functions used in file operations
+const struct file_operations fopp = {
+	.owner = THIS_MODULE,
+	.open = __mod_open,
+	.release = __mod_close,
+	.read = __mod_read,
+	.write = __mod_write,
+};
+
+//
+// MODULE INIT FUNCTION
+static int
+__mod_init(void)
+{
+	// Register character device
+	iMajorNumber = register_chrdev(	__MODULE_MAJOR_NUMBER,	/* Major number you want to request */
+									__MODULE_NAME,			/* Set your module name */
+									&fopp);					/* Define the functions you want to use for file operations */
+
+	// Always error check
+	if(iMajorNumber < 0) {
+		printk(KERN_ALERT "%s: Failed to initialize module\n", __MODULE_NAME);
+		return iMajorNumber;
+	}
+
+	printk(KERN_ALERT "%s: Module successfully initialized\n", __MODULE_NAME);
+	return 0;
+}
+
+//
+// MODULE EXIT FUNCTION
+static void
+__mod_exit(void)
+{
+	// Unregister character device
+	unregister_chrdev(__MODULE_MAJOR_NUMBER, __MODULE_NAME);
+
+	printk(KERN_ALERT "%s: Module successfully unloaded\n", __MODULE_NAME);
+}
+
+//
+// REGISTER INIT AND EXIT FUNCTIONS
+module_init(__mod_init);
+module_exit(__mod_exit);
